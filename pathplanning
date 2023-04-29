@@ -1,0 +1,324 @@
+% function [path_grid, path_length] = pathPlanning(start, goal, map)
+% 输入参数：
+% start: 起点坐标，形如 [x, y] 的向量
+% goal: 终点坐标，形如 [x, y] 的向量
+% map: 栅格地图，二维矩阵，0表示可以通过的栅格，1表示障碍
+
+% 参数设定
+num_bees = 100;             % 蜜蜂数量
+num_iterations = 50;        % 迭代次数
+max_trials = 50;            % 最大试验次数
+elite_bees_ratio = 0.3;     % 精英蜜蜂比例
+scout_bees_ratio = 0.3;     % 搜索蜜蜂比例
+
+% 设计适应度函数
+fitness_func = @(x) fitnessFunction(x, map);
+
+% 初始化蜜蜂群体
+bees = initializeBees(num_bees, start, goal, map);
+
+% 迭代更新蜜蜂群体
+for iter = 1:num_iterations
+    % 更新精英蜜蜂
+    elite_bees = selectEliteBees(bees, elite_bees_ratio, fitness_func);
+    elite_bees = updateEliteBees(elite_bees, map);
+    
+    % 更新跟随蜜蜂
+    follower_bees = selectFollowerBees(bees, elite_bees_ratio, fitness_func);
+    follower_bees = updateFollowerBees(follower_bees, elite_bees, max_trials, map);
+    
+    % 更新搜索蜜蜂
+    scout_bees = selectScoutBees(bees, scout_bees_ratio);
+    scout_bees = updateScoutBees(scout_bees, start, goal, map);
+    
+    % 合并更新后的蜜蜂
+    bees = [elite_bees; follower_bees; scout_bees];
+end
+
+% 选择最优路径
+best_path = selectBestPath(bees, fitness_func);
+
+% 将路径转换为栅格块坐标
+path_grid = round(best_path./repmat(grid_size, size(best_path,1),1));
+
+% 计算路径长度
+path_length = getPathLength(best_path);
+% end
+
+
+function fitness = fitnessFunction(path, map)
+% 计算路径的适应度
+% 输入：
+%   path: 1 x n数组，表示路径上每个点的索引
+%   map: 地图矩阵，0表示通道，1表示障碍物
+% 输出：
+%   fitness: 路径的适应度值
+
+% 计算路径长度
+pathLength = getPathLength(path);
+
+% 判断路径是否合法
+if any(map(path))
+    % 路径经过障碍物，设置适应度为无穷大
+    fitness = Inf;
+else
+    % 路径合法，适应度为路径长度的倒数
+    fitness = 1 / pathLength;
+end
+end
+
+function length = getPathLength(path)
+n = size(path, 1);
+
+% 初始化距离矩阵，全部赋值为0
+dist = zeros(n, n);
+
+% 计算每个相邻点之间的距离
+for i = 1:n-1
+        if path(i,1) == path(i+1,1) || path(i,2) == path(i+1,2)
+            % 同行或同列的情况，距离为1
+            dist(i+1,i+2) = 1;
+        else
+            % 对角线上的情况，距离为1.4
+            dist(i+1,i+2) = 1.4;
+        end
+end
+for i = 1:n
+    dist(i,i) = 0;
+end
+
+% 计算每个相邻点之间的距离和
+sum_dist = sum(sum(dist));
+length = sum_dist;
+end
+
+function bees = initializeBees(populationSize, startPoint, goalPoint, map)
+% 初始化蜜蜂群体
+% 输入：
+%   populationSize: 蜜蜂个数
+%   startPoint: 起始点
+%   goalPoint: 目标点
+%   map: 地图矩阵，0表示通道，1表示障碍物
+% 输出：
+%   bees: 蜜蜂群体
+
+% 初始化蜜蜂群体
+bees = repmat(struct('path', [], 'fitness', []), populationSize, 1);
+
+% 生成随机路径
+for i = 1:populationSize
+    % 随机生成一条路径
+    path = generateRandomPath(startPoint, goalPoint, map);
+    
+    % 计算路径的适应度值
+    fitness = fitnessFunction(path, map);
+    
+    % 将路径和适应度值存入蜜蜂结构体
+    bees(i).path = path;
+    bees(i).fitness = fitness;
+end
+
+end
+
+function [elite_bees, elite_fitness] = selectEliteBees(bees, elite_bees_ratio, fitness_func)
+% 首先计算每个蜜蜂的适应度
+fitness = fitness_func(bees);
+
+% 计算需要选择的最佳蜜蜂数量
+elite_bees_count = round(length(bees) * elite_bees_ratio);
+
+% 找到适应度最高的蜜蜂
+[elite_fitness, elite_indexes] = sort(fitness, 'descend');
+elite_bees = bees(elite_indexes(1:elite_bees_count), :);
+end
+
+
+function eliteBees = updateEliteBees(eliteBees, newBees)
+% 更新精英蜜蜂
+% 输入：
+%   eliteBees: 原始的精英蜜蜂
+%   newBees: 新生成的蜜蜂
+% 输出：
+%   eliteBees: 更新后的精英蜜蜂
+
+% 将新生成的蜜蜂添加到原始精英蜜蜂后面
+allBees = [eliteBees, newBees];
+
+% 按适应度值从小到大对蜜蜂进行排序
+[~, sortedIndex] = sort([allBees.fitness]);
+
+% 选择适应度值最小的和次小的蜜蜂作为新的精英蜜蜂
+eliteBees = allBees(sortedIndex(1:2));
+
+end
+
+function followerBees = selectFollowerBees(bees, eliteBees, patchSize)
+% 选择跟随蜜蜂
+% 输入：
+%   bees: 所有蜜蜂
+%   eliteBees: 精英蜜蜂
+%   patchSize: 采蜜区域大小
+% 输出：
+%   followerBees: 跟随蜜蜂
+
+% 蜜蜂的数量
+numBees = numel(bees);
+
+% 初始化跟随蜜蜂的结构体数组
+followerBees = repmat(struct('path',[],'fitness',[]), [1, numBees]);
+
+% 遍历所有蜜蜂
+for i = 1:numBees
+    % 选择采蜜区域
+    patchIndex = randperm(numel(bees(i).path), patchSize);
+    patch = bees(i).path(patchIndex);
+    
+    % 选择领航蜜蜂
+    navigator = eliteBees(randi(2));
+    
+    % 根据领航蜜蜂和采蜜区域计算新路径
+    newPatch = calculateNewPath(navigator.path, patch);
+    
+    % 将新路径和适应度值保存到跟随蜜蜂结构体中
+    followerBees(i).path = [bees(i).path(1:patchIndex(1)-1), newPatch, bees(i).path(patchIndex(end)+1:end)];
+    followerBees(i).fitness = fitnessFunction(followerBees(i).path);
+end
+
+end
+
+function newPositions = updateFollowerBees(positions, elitePositions, lb, ub)
+% positions：当前蜜蜂的位置，每行表示一个蜜蜂的位置
+% elitePositions：当前最优解蜜蜂的位置，每行表示一个蜜蜂的位置
+% lb：变量的下界
+% ub：变量的上界
+
+% 计算每个跟随蜜蜂的新位置
+numFollowers = size(positions, 1);
+newPositions = zeros(numFollowers, size(positions, 2));
+for i = 1:numFollowers
+    % 随机选择一个最优解蜜蜂
+    eliteBeeIdx = randi(size(elitePositions, 1));
+    % 生成新位置
+    newPositions(i,:) = positions(i,:) + rand(1, size(positions, 2)).*(elitePositions(eliteBeeIdx,:) - positions(i,:));
+    % 将新位置限制在搜索空间内
+    newPositions(i,:) = max(newPositions(i,:), lb);
+    newPositions(i,:) = min(newPositions(i,:), ub);
+end
+
+end
+
+function positions = selectScoutBees(positions, lb, ub, numElite, numFollowers, numScouts)
+% positions：当前蜜蜂的位置，每行表示一个蜜蜂的位置
+% lb：变量的下界
+% ub：变量的上界
+% numElite：精英蜜蜂数量
+% numFollowers：跟随蜜蜂数量
+% numScouts：侦查蜜蜂数量
+
+% 计算每个侦查蜜蜂的新位置
+numVariables = size(positions, 2);
+for i = 1:numScouts
+    % 随机选择一个变量
+    varIdx = randi(numVariables);
+    % 随机生成新位置
+    newPos = lb(varIdx) + rand*(ub(varIdx) - lb(varIdx));
+    % 将新位置与当前蜜蜂位置进行比较
+    % 如果新位置更优，则更新当前蜜蜂位置
+    if fitnessFunction(newPos) < fitnessFunction(positions(numElite+numFollowers+i,:))
+        positions(numElite+numFollowers+i, varIdx) = newPos;
+    end
+end
+
+end
+
+function positions = updateScoutBees(positions, lb, ub, numElite, numFollowers, numScouts)
+% positions：当前蜜蜂的位置，每行表示一个蜜蜂的位置
+% lb：变量的下界
+% ub：变量的上界
+% numElite：精英蜜蜂数量
+% numFollowers：跟随蜜蜂数量
+% numScouts：侦查蜜蜂数量
+
+% 对所有侦查蜜蜂进行更新
+numVariables = size(positions, 2);
+for i = numElite+numFollowers+1:numElite+numFollowers+numScouts
+    % 随机选择一个变量
+    varIdx = randi(numVariables);
+    % 随机生成新位置
+    newPos = lb(varIdx) + rand*(ub(varIdx) - lb(varIdx));
+    % 更新蜜蜂的位置
+    positions(i, varIdx) = newPos;
+end
+
+end
+
+function [bestPath, bestLength] = selectBestPath(positions, paths)
+% positions：所有蜜蜂的位置，每行表示一个蜜蜂的位置
+% paths：所有蜜蜂的路径，每行表示一个蜜蜂的路径
+% bestPath：最佳路径，表示为一串栅格块的索引
+% bestLength：最佳路径长度
+
+% 计算每个蜜蜂路径的长度
+pathLengths = zeros(size(positions, 1), 1);
+for i = 1:size(positions, 1)
+    pathLengths(i) = getPathLength(paths(i,:));
+end
+
+% 选择路径长度最小的蜜蜂路径作为最佳路径
+[bestLength, bestIdx] = min(pathLengths);
+bestPath = paths(bestIdx,:);
+
+end
+
+function path = generateRandomPath(start, goal, map)
+% start：起始点，表示为一维坐标
+% goal：目标点，表示为一维坐标
+% map：栅格地图，包括障碍物和空地
+% path：随机路径，表示为一串栅格块的索引
+
+% 生成起始点到目标点的直线路径
+linePath = generateLinePath(start, goal, map);
+
+% 随机扰动直线路径，生成随机路径
+path = addNoiseToPath(linePath, map);
+
+end
+
+function path = generateLinePath(start, goal, map)
+% start：起始点，表示为一维坐标
+% goal：目标点，表示为一维坐标
+% map：栅格地图，包括障碍物和空地
+% path：直线路径，表示为一串栅格块的索引
+
+% 将一维坐标转化为二维坐标
+[startY, startX] = ind2sub(size(map), start);
+[goalY, goalX] = ind2sub(size(map), goal);
+startY = start(1,2);
+startX = start(1,1);
+goalY  = goal(1,2);
+goalX  = goal(1,1);
+% 生成起始点到目标点的直线路径
+path = sub2ind(size(map), round(linspace(startY, goalY, max(abs(startY-goalY), abs(startX-goalX)))), ...
+    round(linspace(startX, goalX, max(abs(startY-goalY), abs(startX-goalX))))); 
+
+end
+
+function noisyPath = addNoiseToPath(path, map)
+% path：路径，表示为一串栅格块的索引
+% map：栅格地图，包括障碍物和空地
+% noisyPath：加入随机扰动后的路径，表示为一串栅格块的索引
+
+% 获取路径的行列坐标
+[pathY, pathX] = ind2sub(size(map), path);
+
+% 生成随机扰动
+randX = randn(size(pathX))*0.1;
+randY = randn(size(pathY))*0.1;
+
+% 将路径加入随机扰动
+noisyPath = sub2ind(size(map), round(pathY+randY), round(pathX+randX));
+
+% 剔除路径中的重复栅格块
+noisyPath = unique(noisyPath);
+
+end
