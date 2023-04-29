@@ -58,7 +58,9 @@ function fitness = fitnessFunction(path, map)
 pathLength = getPathLength(path);
 
 % 判断路径是否合法
-if any(map(path))
+if any(map(path(1i,2), path(1i,1)))
+
+
     % 路径经过障碍物，设置适应度为无穷大
     fitness = Inf;
 else
@@ -75,7 +77,9 @@ dist = zeros(n, n);
 
 % 计算每个相邻点之间的距离
 for i = 1:n-1
-        if path(i,1) == path(i+1,1) || path(i,2) == path(i+1,2)
+      if path(i).x == path(i+1).x || path(i).y == path(i+1).y
+
+
             % 同行或同列的情况，距离为1
             dist(i+1,i+2) = 1;
         else
