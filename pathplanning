@@ -15,7 +15,7 @@ scout_bees_ratio = 0.3;     % 搜索蜜蜂比例
 fitness_func = @(x) fitnessFunction(x, map);
 
 % 初始化蜜蜂群体
-bees = initializeBees(num_bees, start, goal, map);
+bees = initializeBees(num_bees,map,start, goal);
 
 % 迭代更新蜜蜂群体
 for iter = 1:num_iterations
@@ -58,8 +58,7 @@ function fitness = fitnessFunction(path, map)
 pathLength = getPathLength(path);
 
 % 判断路径是否合法
-if any(map(path(1i,2), path(1i,1)))
-
+if any(path)
 
     % 路径经过障碍物，设置适应度为无穷大
     fitness = Inf;
@@ -77,7 +76,7 @@ dist = zeros(n, n);
 
 % 计算每个相邻点之间的距离
 for i = 1:n-1
-      if path(i).x == path(i+1).x || path(i).y == path(i+1).y
+      if path(i,1) == path(i+1,1) || path(i,2)== path(i+1,2)
 
 
             % 同行或同列的情况，距离为1
@@ -96,33 +95,32 @@ sum_dist = sum(sum(dist));
 length = sum_dist;
 end
 
-function bees = initializeBees(populationSize, startPoint, goalPoint, map)
-% 初始化蜜蜂群体
-% 输入：
-%   populationSize: 蜜蜂个数
-%   startPoint: 起始点
-%   goalPoint: 目标点
-%   map: 地图矩阵，0表示通道，1表示障碍物
-% 输出：
-%   bees: 蜜蜂群体
+function bees = initializeBees(n, map, start, goal)
+% 初始化蜜蜂
+% n: 蜜蜂数量
+% map: 地图
+% start: 起始点
+% goal: 目标点
+% bees: 初始化后的蜜蜂
 
-% 初始化蜜蜂群体
-bees = repmat(struct('path', [], 'fitness', []), populationSize, 1);
-
-% 生成随机路径
-for i = 1:populationSize
-    % 随机生成一条路径
-    path = generateRandomPath(startPoint, goalPoint, map);
-    
-    % 计算路径的适应度值
-    fitness = fitnessFunction(path, map);
-    
-    % 将路径和适应度值存入蜜蜂结构体
-    bees(i).path = path;
-    bees(i).fitness = fitness;
+% 初始化蜜蜂
+bees = zeros(n, 2);
+for i = 1:n
+    % 随机生成蜜蜂位置
+    x = randi(size(map, 1));
+    y = randi(size(map, 2));
+    while map(x,y) == 1 % 确保位置不在障碍物上
+        x = randi(size(map, 1));
+        y = randi(size(map, 2));
+    end
+    bees(i,:) = [x,y];
 end
 
+% 将起始点和目标点加入蜜蜂位置中
+bees(1,:) = start;
+bees(end,:) = goal;
 end
+
 
 function [elite_bees, elite_fitness] = selectEliteBees(bees, elite_bees_ratio, fitness_func)
 % 首先计算每个蜜蜂的适应度
@@ -161,34 +159,49 @@ function followerBees = selectFollowerBees(bees, eliteBees, patchSize)
 % 输入：
 %   bees: 所有蜜蜂
 %   eliteBees: 精英蜜蜂
-%   patchSize: 采蜜区域大小
+%   patchSize: 每个跟随蜜蜂搜索范围大小
 % 输出：
 %   followerBees: 跟随蜜蜂
 
-% 蜜蜂的数量
-numBees = numel(bees);
+% 计算每个精英蜜蜂周围的 patchSize × patchSize 区域内的最佳位置
+elitePositions = [eliteBees.position];
+patchSize = (patchSize - 1) / 2;
+eliteBestPositions = zeros(size(elitePositions));
+for i = 1:numel(eliteBees)
+    x = elitePositions(1, i);
+    y = elitePositions(2, i);
+    patchX = max(x-patchSize, 1) : min(x+patchSize, size(bees,1));
+    patchY = max(y-patchSize, 1) : min(y+patchSize, size(bees,2));
+    subBees = bees(patchX, patchY);
+    [~, bestIndex] = min([subBees(:).fitness]);
+    eliteBestPositions(:, i) = subBees(bestIndex).position;
+end
 
-% 初始化跟随蜜蜂的结构体数组
-followerBees = repmat(struct('path',[],'fitness',[]), [1, numBees]);
-
-% 遍历所有蜜蜂
-for i = 1:numBees
-    % 选择采蜜区域
-    patchIndex = randperm(numel(bees(i).path), patchSize);
-    patch = bees(i).path(patchIndex);
+% 计算每个跟随蜜蜂周围的 patchSize × patchSize 区域内的最佳位置
+followerBees = bees;
+for i = 1:numel(followerBees)
+    x = followerBees(i).position(1);
+    y = followerBees(i).position(2);
+    patchX = max(x-patchSize, 1) : min(x+patchSize, size(bees,1));
+    patchY = max(y-patchSize, 1) : min(y+patchSize, size(bees,2));
+    subBees = bees(patchX, patchY);
+    [~, bestIndex] = min([subBees(:).fitness]);
+    bestPosition = subBees(bestIndex).position;
     
-    % 选择领航蜜蜂
-    navigator = eliteBees(randi(2));
-    
-    % 根据领航蜜蜂和采蜜区域计算新路径
-    newPatch = calculateNewPath(navigator.path, patch);
-    
-    % 将新路径和适应度值保存到跟随蜜蜂结构体中
-    followerBees(i).path = [bees(i).path(1:patchIndex(1)-1), newPatch, bees(i).path(patchIndex(end)+1:end)];
-    followerBees(i).fitness = fitnessFunction(followerBees(i).path);
+    % 与最近的精英蜜蜂比较位置，更新位置
+    eliteDistance = vecnorm(repmat(followerBees(i).position, 1, 2) - eliteBestPositions);
+    [~, eliteIndex] = min(eliteDistance);
+    if followerBees(i).fitness > eliteBees(eliteIndex).fitness
+        % 若距离最近的精英蜜蜂比当前蜜蜂更优，则选择该精英蜜蜂的位置作为新位置
+        followerBees(i).position = eliteBestPositions(:, eliteIndex);
+    else
+        % 否则选择局部最优位置作为新位置
+        followerBees(i).position = bestPosition;
+    end
 end
 
 end
+
 
 function newPositions = updateFollowerBees(positions, elitePositions, lb, ub)
 % positions：当前蜜蜂的位置，每行表示一个蜜蜂的位置
